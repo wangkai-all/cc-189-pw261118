@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>派生表重建控制台 · daily_settlement</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M16 6l10 10-10 10L6 16z' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">◈</div>
+      <div>
+        <h1>派生表重建控制台</h1>
+        <p class="brand-sub"><code>daily_settlement</code> · 按代次构建、分区核对、切换读入口</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span class="engine-pill" id="engine-pill"><span class="dot"></span>引擎运行中</span>
+      <button class="btn ghost" id="refresh-btn" type="button">立即刷新</button>
+    </div>
+  </header>
+
+  <section class="visible-panel" aria-labelledby="visible-title">
+    <div class="visible-main">
+      <div class="eyebrow" id="visible-title">实际可见版本 · 读入口</div>
+      <div class="hero-row">
+        <div class="hero-figure" id="visible-generation">—</div>
+        <div class="hero-meta">
+          <div class="hero-status" id="visible-status">加载中</div>
+          <div class="hero-bind" id="visible-bind">源版本 — · 规则 —</div>
+          <div class="hero-note" id="visible-note"></div>
+        </div>
+      </div>
+      <div class="visible-amounts" id="visible-amounts"></div>
+    </div>
+    <div class="visible-side">
+      <div class="side-block">
+        <div class="side-label">最新发起代次</div>
+        <div class="side-value" id="latest-generation">—</div>
+      </div>
+      <div class="side-block">
+        <div class="side-label">正在使用旧代次的读者</div>
+        <div class="side-value" id="visible-leases">—</div>
+      </div>
+      <div class="side-block">
+        <div class="side-label">读入口切换于</div>
+        <div class="side-value small" id="switched-at">—</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grid-2">
+    <section class="panel" aria-labelledby="launch-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="launch-title">发起重建</h2>
+          <p class="panel-sub">每次任务固定绑定源版本、规则版本和递增代次。发起两次即可得到两个交错的任务。</p>
+        </div>
+        <span class="tag" id="next-generation-tag">下一个代次 —</span>
+      </div>
+
+      <form id="launch-form" autocomplete="off" novalidate>
+        <div class="field-row">
+          <label class="field">
+            <span class="field-label">源数据版本</span>
+            <select id="source-version" name="sourceVersion"></select>
+            <span class="field-hint" id="source-hint"></span>
+          </label>
+          <label class="field">
+            <span class="field-label">规则版本</span>
+            <select id="rule-version" name="ruleVersion"></select>
+            <span class="field-hint" id="rule-hint"></span>
+          </label>
+        </div>
+
+        <div class="field-row three">
+          <label class="field">
+            <span class="field-label">分区构建耗时</span>
+            <div class="input-unit">
+              <input id="opt-partition-ms" type="number" min="400" max="120000" step="1" value="1500" />
+              <span>ms</span>
+            </div>
+            <span class="field-hint">每个分区扫描源数据的预算</span>
+          </label>
+          <label class="field">
+            <span class="field-label">独立复核耗时</span>
+            <div class="input-unit">
+              <input id="opt-verify-ms" type="number" min="200" max="120000" step="1" value="500" />
+              <span>ms</span>
+            </div>
+            <span class="field-hint">重扫源数据比对聚合值</span>
+          </label>
+          <label class="field">
+            <span class="field-label">分区并发</span>
+            <input id="opt-concurrency" type="number" min="1" max="12" step="1" value="4" />
+            <span class="field-hint">每个任务同时跑几个分区</span>
+          </label>
+        </div>
+
+        <details class="advanced" id="advanced">
+          <summary>
+            <span>故障与耗时注入</span>
+            <span class="summary-note">默认不注入，所有分区都会完整算完</span>
+          </summary>
+          <div class="advanced-body">
+            <p class="advanced-help">
+              故障只在对应阶段触发。<strong>单次</strong>故障重试后即通过，<strong>持续</strong>故障每次重试都会再次触发；
+              <strong>篡改</strong>改写构建产物，必须由独立复核发现并拦截。
+            </p>
+            <div id="fault-rows"></div>
+            <div class="fault-add-row">
+              <select id="fault-partition" class="mini-select"></select>
+              <select id="fault-stage" class="mini-select">
+                <option value="build">构建阶段</option>
+                <option value="verify">复核阶段</option>
+              </select>
+              <select id="fault-mode" class="mini-select">
+                <option value="once">单次故障</option>
+                <option value="always">持续故障</option>
+                <option value="slow">仅放慢</option>
+                <option value="corrupt">篡改产物</option>
+              </select>
+              <div class="input-unit compact">
+                <input id="fault-at" type="number" min="5" max="98" step="1" value="50" />
+                <span>%</span>
+              </div>
+              <button class="btn small" type="button" id="fault-add">添加</button>
+            </div>
+            <div class="fault-presets">
+              <button class="btn tiny ghost" type="button" data-preset="interleave">示例：两个交错任务</button>
+              <button class="btn tiny ghost" type="button" data-preset="fail">示例：分区失败 + 重试</button>
+              <button class="btn tiny ghost" type="button" data-preset="tamper">示例：产物被篡改</button>
+            </div>
+          </div>
+        </details>
+
+        <label class="field">
+          <span class="field-label">任务备注</span>
+          <input id="build-note" type="text" maxlength="120" placeholder="例如：规则变更 v2 回溯 90 天" />
+        </label>
+
+        <div class="launch-actions">
+          <button class="btn primary" type="submit" id="launch-btn">发起重建</button>
+          <span class="launch-hint" id="launch-hint">将创建代次 —，共 12 个分区</span>
+        </div>
+        <div class="form-error" id="launch-error" hidden></div>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="reader-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="reader-title">读者租约</h2>
+          <p class="panel-sub">读者打开某个代次时持有租约。回收会先检查租约，旧表在整个读取期间保持可查。</p>
+        </div>
+      </div>
+
+      <form id="lease-form" class="lease-form" autocomplete="off">
+        <label class="field">
+          <span class="field-label">读者标识</span>
+          <input id="lease-reader" type="text" maxlength="40" placeholder="analyst-1" />
+        </label>
+        <label class="field">
+          <span class="field-label">读取代次</span>
+          <select id="lease-generation"></select>
+        </label>
+        <label class="field">
+          <span class="field-label">持有时间</span>
+          <select id="lease-ttl">
+            <option value="15000">15 秒</option>
+            <option value="60000">60 秒</option>
+            <option value="300000" selected>5 分钟</option>
+          </select>
+        </label>
+        <button class="btn" type="submit" id="lease-open">打开代次并持有租约</button>
+      </form>
+
+      <div class="lease-list" id="lease-list"></div>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="builds-title">
+    <div class="panel-head">
+      <div>
+        <h2 id="builds-title">任务与分区</h2>
+        <p class="panel-sub">每个分区先构建、再独立复核。只有当前代次的 12/12 分区全部核对通过，才会切换读入口。</p>
+      </div>
+      <div class="legend-inline" id="builds-legend">
+        <span class="legend-item"><span class="status-dot complete"></span>已核对</span>
+        <span class="legend-item"><span class="status-dot running"></span>进行中</span>
+        <span class="legend-item"><span class="status-dot failed"></span>失败</span>
+        <span class="legend-item"><span class="status-dot paused"></span>已暂停</span>
+      </div>
+    </div>
+    <div class="builds" id="builds"></div>
+    <div class="empty-state" id="builds-empty" hidden>还没有发起过重建。</div>
+  </section>
+
+  <div class="grid-2 wide-left">
+    <section class="panel" aria-labelledby="compare-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="compare-title">代次对比</h2>
+          <p class="panel-sub">旧代次结果保留到显式回收，用于逐分区比较净额差异。</p>
+        </div>
+        <label class="inline-select">
+          <span>对照</span>
+          <select id="compare-generation"></select>
+        </label>
+      </div>
+      <div id="compare-summary" class="compare-summary"></div>
+      <figure class="chart-figure" id="compare-figure">
+        <figcaption class="chart-caption" id="chart-caption"></figcaption>
+        <div class="chart-legend" id="chart-legend"></div>
+        <div id="chart-host" class="chart-host"></div>
+        <div class="table-toggle-row">
+          <button class="btn tiny ghost" type="button" id="toggle-table" aria-expanded="false">表格视图</button>
+        </div>
+        <div id="compare-table" class="table-wrap" hidden></div>
+      </figure>
+    </section>
+
+    <section class="panel" aria-labelledby="history-title">
+      <div class="panel-head">
+        <div>
+          <h2 id="history-title">代次历史</h2>
+          <p class="panel-sub">被替代的任务保留结果，回收前必须确认没有活跃读者。</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="history-table">
+          <thead>
+            <tr>
+              <th>代次</th>
+              <th>源 / 规则</th>
+              <th>状态</th>
+              <th>读者</th>
+              <th class="num">净额</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel" aria-labelledby="events-title">
+    <div class="panel-head">
+      <div>
+        <h2 id="events-title">运行日志</h2>
+        <p class="panel-sub">分区进度、复核结论、读入口切换与回收检查都记录在此。</p>
+      </div>
+      <label class="inline-select">
+        <span>筛选</span>
+        <select id="event-filter">
+          <option value="all">全部</option>
+          <option value="important">仅关键事件</option>
+          <option value="error">仅失败与告警</option>
+        </select>
+      </label>
+    </div>
+    <ol class="event-log" id="event-log"></ol>
+  </section>
+
+  <footer class="foot">
+    <span>合成数据：360 天 × 1,200 单；每个分区扫描 90 天回溯窗口 + 自身 30 天输出窗口。</span>
+    <span>所有进度来自真实源行扫描与复核，界面状态仅反映计算结果。</span>
+  </footer>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

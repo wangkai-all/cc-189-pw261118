@@ -1,0 +1,15 @@
+{
+  "name": "derived-table-rebuild-console",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generation-aware derived-table rebuild console with partition verification, reader leases and reclaim safety.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test 'tests/*.test.js'"
+  }
+}
